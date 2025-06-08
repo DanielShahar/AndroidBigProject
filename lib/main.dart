@@ -1,50 +1,33 @@
 import 'package:flutter/material.dart';
 import 'package:android_big_project/screens/dashboard_screen.dart';
+import 'package:permission_handler/permission_handler.dart'; // Add this import
 
+// Function to request storage permission
+Future<void> requestStoragePermission() async {
+  var status = await Permission.storage.status;
+  if (!status.isGranted) {
+    // If permission is not granted, request it
+    await Permission.storage.request();
+  }
+}
 
-void main() {
+void main() async { // Make main an async function
+  WidgetsFlutterBinding.ensureInitialized(); // Ensure Flutter is initialized
+  await requestStoragePermission(); // Request permission before running the app
   runApp(const MyApp());
 }
 
 class MyApp extends StatelessWidget {
   const MyApp({super.key});
 
-  // This widget is the root of your application.
   @override
   Widget build(BuildContext context) {
     return MaterialApp(
       title: 'Flutter Demo',
       theme: ThemeData(
-        // This is the theme of your application.
-        //
-        // TRY THIS: Try running your application with "flutter run". You'll see
-        // the application has a purple toolbar. Then, without quitting the app,
-        // try changing the seedColor in the colorScheme below to Colors.green
-        // and then invoke "hot reload" (save your changes or press the "hot
-        // reload" button in a Flutter-supported IDE, or press "r" if you used
-        // the command line to start the app).
-        //
-        // Notice that the counter didn't reset back to zero; the application
-        // state is not lost during the reload. To reset the state, use hot
-        // restart instead.
-        //
-        // This works for code too, not just values: Most code changes can be
-        // tested with just a hot reload.
         colorScheme: ColorScheme.fromSeed(seedColor: Colors.deepPurple),
       ),
-      //home: const Login(title: 'Login App'),
-      //home: const VerifyCodePage(title: 'Login App'),
-      //home: const AppsListPage(),
-      //home: const ProfileScreen(),
-      //home: const SettingsScreen(),
-      //home: const ItemsScreen(),
-
       home: const DashboardScreen(),
-      //home: const BooksListPage1(),
-     
     );
   }
 }
-
-
-
