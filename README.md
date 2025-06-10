@@ -2,4 +2,6 @@
 
 A new Flutter project.
 
-This is a simple school project, and therefore it is a public project for educational purposes. The keys are intentionally exposed for the professor's review.
+## Important Security Note
+
+This repository contains `firebase_options.dart`, which includes API keys for a Firebase project. This is intentionally public for the purpose of a school assignment and professor review. In a production application, these keys would be secured using environment variables and `.gitignore` to prevent public exposure.
