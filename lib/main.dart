@@ -8,8 +8,11 @@ import 'package:android_big_project/firebase_options.dart';
 // This must be a top-level function or a static method.
 // The @pragma('vm:entry-point') annotation is necessary for AOT compilation.
 @pragma('vm:entry-point')
-void downloadCallback(String id, DownloadTaskStatus status, int progress) {
+void downloadCallback(String id, int status, int progress) { // Changed DownloadTaskStatus to int
   print('Download task ($id) status: $status, progress: $progress');
+  // If you still want to use DownloadTaskStatus enum for readability inside the function, you can cast it:
+  // final downloadStatus = DownloadTaskStatus.values[status];
+  // print('Download task ($id) status: $downloadStatus, progress: $progress');
 }
 
 

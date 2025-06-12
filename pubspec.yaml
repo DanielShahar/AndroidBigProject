@@ -34,7 +34,7 @@ dependencies:
   cloud_firestore: ^4.15.7 # Use the latest stable version
   flutter_downloader: ^1.11.0 # Use the latest stable version
   path_provider: ^2.1.2 # Use the latest stable version
-  open_file_plus: ^3.4.1 # Use the latest stable version (open_file is deprecated)
+  open_filex: ^4.3.2  # Use the latest stable version (open_file is deprecated)
   permission_handler: ^11.3.0 # Already in your main.dart, ensure it's here too
 
   # The following adds the Cupertino Icons font to your application.

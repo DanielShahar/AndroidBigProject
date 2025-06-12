@@ -2,7 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:flutter_downloader/flutter_downloader.dart';
 import 'package:path_provider/path_provider.dart';
-import 'package:open_file_plus/open_file_plus.dart';
+import 'package:open_filex/open_filex.dart';
 
 
 class BooksListPage1 extends StatefulWidget {
@@ -154,7 +154,7 @@ class _BooksListPageState extends State<BooksListPage1> {
                             String extension = widget.fileType == 'word' ? 'docx' : 'pdf';
                             final cleanFileName = bookTitle.replaceAll(RegExp(r'[^\w\s.-]'), '').trim();
                             final filePath = '${directory.path}/$cleanFileName.$extension';
-                            OpenFilePlus.open(filePath);
+                            OpenFilex.open(filePath);
                           } else {
                             ScaffoldMessenger.of(context).showSnackBar(
                               const SnackBar(content: Text('Could not access storage to open file.')),
