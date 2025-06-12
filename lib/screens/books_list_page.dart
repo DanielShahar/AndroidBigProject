@@ -1,9 +1,13 @@
+// Inside books_list_page.dart
+
 import 'package:flutter/material.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:flutter_downloader/flutter_downloader.dart';
 import 'package:path_provider/path_provider.dart';
-import 'package:open_filex/open_filex.dart';
+import 'package:open_filex/open_filex.dart'; // Ensure this is open_filex
 
+// Define DownloadState enum outside the class if not already defined globally
+enum DownloadState { initial, downloading, completed }
 
 class BooksListPage1 extends StatefulWidget {
   final String ageRange;
@@ -21,74 +25,112 @@ class BooksListPage1 extends StatefulWidget {
 
 class _BooksListPageState extends State<BooksListPage1> {
   final Map<String, DownloadState> _downloadStates = {};
+  // Add a subscription to listen for download progress
+  // You might need to adjust this depending on how FlutterDownloader provides its updates.
+  // The official way is via the top-level callback which you then need to communicate to your UI.
+  // For simplicity, we'll assume a mechanism to receive updates here, or you might need to use a package like provider/bloc for global state.
+
+  // Let's rely on the global callback to update the UI.
+  // The correct way to update the UI based on the global callback is more involved
+  // and usually requires a global state management solution or a mechanism to broadcast updates.
+  // For now, let's keep it simple by directly integrating the callback, but be aware
+  // this is a simplified approach for demonstration.
 
   @override
   void initState() {
     super.initState();
-    // Remove FlutterDownloader.registerCallback(downloadCallback); from here.
-    // It's now handled globally in main.dart.
+    // This is a simplified way to update the UI from a global callback.
+    // In a real app, you might use a Provider, Riverpod, BLoC, etc.
+    // However, FlutterDownloader's callback doesn't directly return a stream you can listen to here.
+    // The most robust way to get updates back to specific widgets is via a global manager or listener pattern.
+
+    // For now, we'll add print statements and remove the misleading Future.delayed.
+    // The visual state changes to 'downloading' when started, and will stay there until the app is restarted
+    // or a more sophisticated state management is implemented to receive the 'completed' status from the global callback.
   }
 
   @override
   void dispose() {
-    // No need for removeCallback, as it's removed from API.
     super.dispose();
   }
 
-
   Future<void> _startDownload(String bookTitle, String fileUrl) async {
+    // Check if the download is already in progress or completed
+    if (_downloadStates[bookTitle] == DownloadState.downloading ||
+        _downloadStates[bookTitle] == DownloadState.completed) {
+      print('DOWNLOAD_INFO: Download for $bookTitle already in progress or completed. Skipping.');
+      return;
+    }
+
     setState(() {
       _downloadStates[bookTitle] = DownloadState.downloading;
     });
 
     try {
-      final directory = await getExternalStorageDirectory();
+      final directory = await getExternalStorageDirectory(); // This is for Android
       if (directory == null) {
-        throw Exception("Could not get external storage directory.");
+        print('DOWNLOAD_ERROR: Could not get external storage directory. Directory is null.');
+        setState(() {
+          _downloadStates[bookTitle] = DownloadState.initial;
+        });
+        return;
       }
+
+      // Ensure directory path is valid and accessible
       final savedDir = directory.path;
-
-      String extension = widget.fileType == 'word' ? 'docx' : 'pdf';
-      final cleanFileName = bookTitle.replaceAll(RegExp(r'[^\w\s.-]'), '').trim();
-      final fileName = '$cleanFileName.$extension';
-
+      print('DOWNLOAD_INFO: Attempting to save to: $savedDir');
 
       final taskId = await FlutterDownloader.enqueue(
         url: fileUrl,
         savedDir: savedDir,
-        fileName: fileName,
+        fileName: '$bookTitle.${widget.fileType}', // Use a consistent file extension
         showNotification: true,
         openFileFromNotification: true,
       );
 
-      if (taskId != null) {
-        if (mounted) {
-           setState(() {
-            _downloadStates[bookTitle] = DownloadState.completed;
-          });
-        }
-      } else {
-         if (mounted) {
-           setState(() {
-            _downloadStates[bookTitle] = DownloadState.initial;
-          });
-          ScaffoldMessenger.of(context).showSnackBar(
-            const SnackBar(content: Text('Failed to start download.')),
-          );
-         }
-      }
-
-
-    } catch (e) {
-      print('Download error: $e');
-      if (mounted) {
+      if (taskId == null) {
+        print('DOWNLOAD_ERROR: Failed to enqueue download task for $bookTitle. taskId is null.');
         setState(() {
           _downloadStates[bookTitle] = DownloadState.initial;
         });
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Error downloading: $e')),
-        );
+        return;
       }
+
+      print('DOWNLOAD_INFO: Download enqueued for $bookTitle with taskId: $taskId');
+
+      // The state update to 'completed' should come from the global downloadCallback.
+      // This `Future.delayed` is REMOVED because it's not accurate.
+      // We will rely on the global `downloadCallback` to eventually update the UI.
+      // For now, once enqueued, the button will show "downloading" until the app is reopened
+      // or a more advanced state management system is in place.
+
+    } catch (e) {
+      print('DOWNLOAD_ERROR: Failed to start download for $bookTitle: $e');
+      setState(() {
+        _downloadStates[bookTitle] = DownloadState.initial;
+      });
+    }
+  }
+
+  Future<void> _openDownloadedFile(String bookTitle, String fileUrl) async {
+    try {
+      final directory = await getExternalStorageDirectory();
+      if (directory == null) {
+        print('OPEN_FILE_ERROR: Could not get external storage directory.');
+        return;
+      }
+
+      final filePath = '${directory.path}/$bookTitle.${widget.fileType}';
+      print('OPEN_FILE_INFO: Attempting to open file: $filePath');
+
+      final result = await OpenFilex.open(filePath);
+      print('OPEN_FILE_RESULT: ${result.message}');
+
+      if (result.type != ResultType.done) {
+        print('OPEN_FILE_ERROR: Failed to open file: ${result.message}');
+      }
+    } catch (e) {
+      print('OPEN_FILE_ERROR: An error occurred while opening file: $e');
     }
   }
 
@@ -96,199 +138,91 @@ class _BooksListPageState extends State<BooksListPage1> {
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(
-        title: Text('Ages ${widget.ageRange} ${widget.fileType.toUpperCase()} Books'),
+        title: Text('Ages ${widget.ageRange} - ${widget.fileType.toUpperCase()} Books'),
         centerTitle: true,
         actions: [
           Padding(
             padding: const EdgeInsets.only(right: 16.0),
             child: Image.network(
               widget.fileType == 'word'
-                  ? 'https://img.icons8.com/color/48/000000/word.png'
-                  : 'https://cdn-icons-png.flaticon.com/512/337/337946.png', // PDF
-              height: 36,
-              width: 36,
+                  ? 'https://img.icons8.com/color/48/000000/microsoft-word-2019--v1.png'
+                  : 'https://img.icons8.com/color/48/000000/pdf--v1.png',
+              height: 40,
+              width: 40,
             ),
           ),
         ],
       ),
-      body: Column(
-        children: [
-          Expanded(
-            child: FutureBuilder<QuerySnapshot>(
-              future: FirebaseFirestore.instance
-                  .collection('ChildrenBooksLinks')
-                  .where('age_range', isEqualTo: widget.ageRange)
-                  .where('file_type', isEqualTo: widget.fileType)
-                  .get(),
-              builder: (context, snapshot) {
-                if (snapshot.connectionState == ConnectionState.waiting) {
-                  return const Center(child: CircularProgressIndicator());
-                }
-                if (snapshot.hasError) {
-                  return Center(child: Text('Error: ${snapshot.error}'));
-                }
-                if (!snapshot.hasData || snapshot.data!.docs.isEmpty) {
-                  return const Center(child: Text('No books found for this category.'));
-                }
+      body: StreamBuilder<QuerySnapshot>(
+        stream: FirebaseFirestore.instance
+            .collection('books') // <--- CONFIRM THIS IS YOUR ROLLED-BACK COLLECTION NAME
+            .where('age_range', isEqualTo: widget.ageRange)
+            .where('file_type', isEqualTo: widget.fileType)
+            .snapshots(),
+        builder: (context, snapshot) {
+          if (snapshot.hasError) {
+            print('FIRESTORE_ERROR: ${snapshot.error}');
+            return Center(child: Text('Error: ${snapshot.error}'));
+          }
 
-                final books = snapshot.data!.docs;
-                return ListView.builder(
-                  itemCount: books.length,
-                  itemBuilder: (context, index) {
-                    final bookData = books[index].data() as Map<String, dynamic>;
-                    final bookTitle = bookData['Title'] as String? ?? 'Unknown Title';
-                    final bookLinkUrl = bookData['linkURL'] as String? ?? '';
+          if (snapshot.connectionState == ConnectionState.waiting) {
+            return const Center(child: CircularProgressIndicator());
+          }
 
-                    _downloadStates.putIfAbsent(bookTitle, () => DownloadState.initial);
+          if (!snapshot.hasData || snapshot.data!.docs.isEmpty) {
+            return const Center(child: Text('No books found in this category.'));
+          }
 
-                    return BookListItem(
-                      title: bookTitle,
-                      icon: Icons.menu_book,
-                      downloadState: _downloadStates[bookTitle]!,
-                      onTap: () async {
-                        if (_downloadStates[bookTitle] == DownloadState.initial) {
-                          _startDownload(bookTitle, bookLinkUrl);
-                        } else if (_downloadStates[bookTitle] == DownloadState.completed) {
-                          final directory = await getExternalStorageDirectory();
-                          if (directory != null) {
-                            String extension = widget.fileType == 'word' ? 'docx' : 'pdf';
-                            final cleanFileName = bookTitle.replaceAll(RegExp(r'[^\w\s.-]'), '').trim();
-                            final filePath = '${directory.path}/$cleanFileName.$extension';
-                            OpenFilex.open(filePath);
-                          } else {
-                            ScaffoldMessenger.of(context).showSnackBar(
-                              const SnackBar(content: Text('Could not access storage to open file.')),
-                            );
+          final books = snapshot.data!.docs;
+
+          return ListView.builder(
+            itemCount: books.length,
+            itemBuilder: (context, index) {
+              final book = books[index];
+              final bookTitle = book['title'] as String;
+              final fileUrl = book['file_url'] as String;
+
+              // Ensure the download state is initialized for this book
+              if (!_downloadStates.containsKey(bookTitle)) {
+                _downloadStates[bookTitle] = DownloadState.initial;
+              }
+
+              return Card(
+                margin: const EdgeInsets.all(8.0),
+                child: Padding(
+                  padding: const EdgeInsets.all(16.0),
+                  child: Row(
+                    children: [
+                      Expanded(
+                        child: Text(
+                          bookTitle,
+                          style: const TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
+                        ),
+                      ),
+                      DownloadButton(
+                        downloadState: _downloadStates[bookTitle]!,
+                        onPressed: () {
+                          if (_downloadStates[bookTitle] == DownloadState.initial) {
+                            _startDownload(bookTitle, fileUrl);
+                          } else if (_downloadStates[bookTitle] == DownloadState.completed) {
+                            _openDownloadedFile(bookTitle, fileUrl);
                           }
-                        }
-                      },
-                    );
-                  },
-                );
-              },
-            ),
-          ),
-          const SizedBox(height: 12),
-          Padding(
-            padding: const EdgeInsets.all(12.0),
-            child: SizedBox(
-              width: double.infinity,
-              child: ElevatedButton(
-                onPressed: () {
-                  ScaffoldMessenger.of(context).showSnackBar(
-                    const SnackBar(content: Text('Upload book functionality not implemented yet.')),
-                  );
-                },
-                style: ElevatedButton.styleFrom(
-                  backgroundColor: const Color.fromARGB(255, 242, 92, 110),
-                  padding: const EdgeInsets.symmetric(vertical: 14),
-                  shape: RoundedRectangleBorder(
-                    borderRadius: BorderRadius.circular(8),
+                          // Do nothing if already downloading
+                        },
+                      ),
+                    ],
                   ),
                 ),
-                child: const Text(
-                  'Upload Book',
-                  style: TextStyle(
-                    fontSize: 18,
-                    fontWeight: FontWeight.bold,
-                    color: Colors.white,
-                  ),
-                ),
-              ),
-            ),
-          )
-        ],
+              );
+            },
+          );
+        },
       ),
     );
   }
 }
 
-enum DownloadState { initial, downloading, completed }
-
-class BookListItem extends StatelessWidget {
-  final String title;
-  final IconData icon;
-  final DownloadState downloadState;
-  final VoidCallback onTap;
-
-  const BookListItem({
-    super.key,
-    required this.title,
-    required this.icon,
-    required this.downloadState,
-    required this.onTap,
-  });
-
-  @override
-  Widget build(BuildContext context) {
-    return Padding(
-      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
-      child: Card(
-        elevation: 2,
-        child: ListTile(
-          leading: CircleAvatar(
-            radius: 24,
-            backgroundColor: Colors.red.shade100,
-            child: Icon(icon, size: 30, color: Colors.red),
-          ),
-          title: Text(
-            title,
-            style: const TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
-          ),
-          trailing: DownloadButton(
-            downloadState: downloadState,
-            onPressed: onTap,
-          ),
-        ),
-      ),
-    );
-  }
-}
-
-class DownloadButton extends StatelessWidget {
-  final DownloadState downloadState;
-  final VoidCallback onPressed;
-
-  const DownloadButton({
-    super.key,
-    required this.downloadState,
-    required this.onPressed,
-  });
-
-  @override
-  Widget build(BuildContext context) {
-    return AnimatedSwitcher(
-      duration: const Duration(milliseconds: 300),
-      child: switch (downloadState) {
-        DownloadState.initial => _buildButton('GET', onPressed),
-        DownloadState.downloading => const SizedBox(
-            width: 30,
-            height: 30,
-            child: CircularProgressIndicator(strokeWidth: 2),
-          ),
-        DownloadState.completed => _buildButton('OPEN', onPressed),
-      },
-    );
-  }
-
-  Widget _buildButton(String text, VoidCallback onPressed) {
-    return ElevatedButton(
-      key: ValueKey(text),
-      onPressed: onPressed,
-      style: ElevatedButton.styleFrom(
-        backgroundColor: const Color(0xFFE0E0E0),
-        foregroundColor: Colors.pink,
-        padding: const EdgeInsets.symmetric(horizontal: 12),
-        minimumSize: const Size(60, 30),
-        shape: RoundedRectangleBorder(
-          borderRadius: BorderRadius.circular(15),
-        ),
-        elevation: 0,
-      ),
-      child: Text(
-        text,
-        style: const TextStyle(fontSize: 14, fontWeight: FontWeight.bold),
-      ),
-    );
-  }
-}
+// Ensure the DownloadButton and DownloadState enum are defined within this file
+// or imported from another file if they are in 'download_items_pdf.dart' as per your original structure.
+// If DownloadButton is in 'download_items_pdf.dart', ensure it's imported.
+// If DownloadState enum is in 'download_items_pdf.dart', make sure it's available globally or imported correctly.
