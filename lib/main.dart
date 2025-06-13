@@ -1,3 +1,6 @@
+// main.dart
+
+import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:android_big_project/screens/dashboard_screen.dart';
 import 'package:permission_handler/permission_handler.dart';
@@ -5,40 +8,50 @@ import 'package:firebase_core/firebase_core.dart';
 import 'package:flutter_downloader/flutter_downloader.dart';
 import 'package:android_big_project/firebase_options.dart';
 
+// Define a global ValueNotifier to hold download updates
+// Key: taskId, Value: DownloadTaskStatus (simplified)
+final ValueNotifier<Map<String, DownloadTaskStatus>> downloadUpdates =
+    ValueNotifier({});
+
 // This must be a top-level function or a static method.
 // The @pragma('vm:entry-point') annotation is necessary for AOT compilation.
 @pragma('vm:entry-point')
-void downloadCallback(String id, DownloadTaskStatus status, int progress) {
-  print('GLOBAL_DOWNLOAD_CALLBACK: Task ($id) status: $status, progress: $progress');
+void downloadCallback(String id, int status, int progress) {
+  final downloadStatus = DownloadTaskStatus.values[status];
+  print('GLOBAL_DOWNLOAD_CALLBACK: Task ($id) status: $downloadStatus, progress: $progress');
 
+  // Update the global notifier directly with taskId and status.
+  // The filename mapping will be handled in the UI (BooksListPage1).
+  downloadUpdates.value = {
+    ...downloadUpdates.value, // Keep existing states
+    id: downloadStatus, // Update this task's status using its ID
+  };
+  // No need to query FlutterDownloader.loadTasksWithRawQuery here,
+  // as it causes MissingPluginException in background isolates.
 }
-
 
 // Function to request storage permission
 Future<void> requestStoragePermission() async {
   var status = await Permission.storage.status;
   if (!status.isGranted) {
-    // If permission is not granted, request it
     await Permission.storage.request();
   }
 }
 
 void main() async {
-  WidgetsFlutterBinding.ensureInitialized(); // Ensure Flutter is initialized
+  WidgetsFlutterBinding.ensureInitialized();
 
-  // Initialize Firebase
   await Firebase.initializeApp(
     options: DefaultFirebaseOptions.currentPlatform,
   );
 
-  // Initialize Flutter Downloader and register the callback
   await FlutterDownloader.initialize(
-    debug: true, // Set to false in production for release builds
-    ignoreSsl: true, // Set to false and handle SSL properly in production if needed
+    debug: true,
+    ignoreSsl: true,
   );
-  FlutterDownloader.registerCallback(downloadCallback); // Register the callback here
+  FlutterDownloader.registerCallback(downloadCallback);
 
-  await requestStoragePermission(); // Request permission before running the app
+  await requestStoragePermission();
   runApp(const MyApp());
 }
 
