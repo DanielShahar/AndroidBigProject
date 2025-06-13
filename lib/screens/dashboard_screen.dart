@@ -1,6 +1,11 @@
+// dashboard_screen.dart
 import 'package:flutter/material.dart';
 import 'second_menu_screen.dart';
 import 'books_list_page.dart';
+import 'package:flutter_downloader/flutter_downloader.dart'; // Import FlutterDownloader
+import 'package:path_provider/path_provider.dart'; // Import path_provider
+import 'dart:io'; // Needed for File operations
+import 'package:path/path.dart' as path; // Needed for path.join
 
 
 class DashboardScreen extends StatefulWidget {
@@ -20,17 +25,86 @@ class _DashboardScreenState extends State<DashboardScreen> {
     {'label': 'Ages 8-12: PDF', 'icon': Icons.auto_stories, 'age': '8-12', 'type': 'pdf'},
   ];
 
+  /// Clears all downloaded files and cancels active tasks.
+  Future<void> _clearAllDownloads() async {
+    try {
+      final directory = await getExternalStorageDirectory();
+      if (directory == null) {
+        print('CLEAR_DOWNLOADS_ERROR: Could not get external storage directory.');
+        return;
+      }
+
+      // Cancel all active FlutterDownloader tasks to prevent orphaned tasks
+      await FlutterDownloader.cancelAll();
+
+      // List all files in the app's external storage directory
+      final files = await directory.list().toList();
+
+      // Define common document file extensions to clear
+      const List<String> documentExtensions = ['.pdf', '.doc', '.docx'];
+
+      for (var entity in files) {
+        if (entity is File) {
+          final fileName = path.basename(entity.path);
+          // Only delete files that match the common document extensions
+          if (documentExtensions.any((ext) => fileName.toLowerCase().endsWith(ext))) {
+            try {
+              await entity.delete();
+              print('CLEARED_DOWNLOAD: Deleted ${entity.path}');
+            } catch (e) {
+              print('CLEAR_DOWNLOAD_ERROR: Failed to delete ${entity.path}: $e');
+            }
+          }
+        }
+      }
+
+      print('CLEAR_DOWNLOADS_INFO: All downloaded document files cleared.');
+    } catch (e) {
+      print('CLEAR_DOWNLOADS_ERROR: General error during clearing downloads: $e');
+    }
+  }
+
+
   @override
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(
         title: const Text('Choose your childs age:', style: TextStyle(
-          fontSize: 30, //Font size 
-          fontWeight: FontWeight.bold, //Bold title 
+          fontSize: 30, //Font size
+          fontWeight: FontWeight.bold, //Bold title
           color: Color.fromARGB(255, 227, 101, 101), //Text color
           ),
         ),
         centerTitle: false,
+        actions: [
+          IconButton(
+            icon: const Icon(Icons.delete_forever), // Icon for clearing downloads
+            tooltip: 'Clear All Downloads',
+            onPressed: () async {
+              // Show a confirmation dialog before deleting all files
+              final confirm = await showDialog<bool>(
+                context: context,
+                builder: (context) => AlertDialog(
+                  title: const Text('Clear All Downloads'),
+                  content: const Text('Are you sure you want to delete all downloaded books (PDF/Word)?'),
+                  actions: [
+                    TextButton(
+                      onPressed: () => Navigator.of(context).pop(false),
+                      child: const Text('Cancel'),
+                    ),
+                    TextButton(
+                      onPressed: () => Navigator.of(context).pop(true),
+                      child: const Text('Delete All'),
+                    ),
+                  ],
+                ),
+              );
+              if (confirm == true) {
+                await _clearAllDownloads();
+              }
+            },
+          ),
+        ],
       ),
       body: Padding(
         padding: const EdgeInsets.all(16.0), //Space around the grid
@@ -84,7 +158,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
       bottomNavigationBar: Column(
         mainAxisSize: MainAxisSize.min,
         children: [
-          
+
           Padding(
             padding: const EdgeInsets.only(bottom: 8.0, top: 4.0),
             child: ElevatedButton(
