@@ -5,6 +5,7 @@ import 'package:flutter_downloader/flutter_downloader.dart';
 import 'package:path_provider/path_provider.dart';
 import 'package:open_filex/open_filex.dart';
 import 'dart:io'; // Needed for File operations
+import 'dart:async'; // Added this import for Timer
 import 'package:path/path.dart' as path; // Needed for path.join
 import 'package:android_big_project/main.dart'; // Import main.dart to access downloadUpdateNotifier
 
@@ -30,33 +31,86 @@ class _BooksListPageState extends State<BooksListPage1> {
   final Map<String, String> _bookTitleToTaskId = {};
   // Map to store taskId -> bookTitle, allowing lookup of bookTitle from taskId
   final Map<String, String> _taskIdToBookTitle = {};
+  
+  // Timer for periodic download status checks
+  Timer? _downloadCheckTimer;
 
   @override
   void initState() {
     super.initState();
     // Listen to global download updates broadcast from main.dart
     downloadUpdateNotifier.addListener(_onDownloadUpdate);
+    // Initialize download states when the page loads
+    _initializeDownloadStates();
   }
 
   @override
   void dispose() {
     // Remove the listener to prevent memory leaks
     downloadUpdateNotifier.removeListener(_onDownloadUpdate);
+    // Cancel the timer if it exists
+    _downloadCheckTimer?.cancel();
     super.dispose();
+  }
+
+  // Initialize download states by checking existing files
+  Future<void> _initializeDownloadStates() async {
+    try {
+      final directory = await getExternalStorageDirectory();
+      if (directory == null) return;
+
+      // Get all books from Firestore to check their download status
+      final snapshot = await FirebaseFirestore.instance
+          .collection('ChildrenBooksLinks')
+          .where('age_range', isEqualTo: widget.ageRange)
+          .where('file_type', isEqualTo: widget.fileType)
+          .get();
+
+      final Map<String, DownloadState> newStates = {};
+      
+      for (var doc in snapshot.docs) {
+        final data = doc.data();
+        final bookTitle = (data['Title'] as String?) ?? 'Unknown Title';
+        final fileName = '$bookTitle.${widget.fileType}';
+        final filePath = path.join(directory.path, fileName);
+        final file = File(filePath);
+
+        if (await file.exists()) {
+          newStates[bookTitle] = DownloadState.completed;
+        } else {
+          newStates[bookTitle] = DownloadState.initial;
+        }
+      }
+
+      if (mounted) {
+        setState(() {
+          _downloadStates.addAll(newStates);
+        });
+      }
+    } catch (e) {
+      print('INIT_ERROR: Error initializing download states: $e');
+    }
   }
 
   // Method to handle updates from the global download callback
   void _onDownloadUpdate() {
     final update = downloadUpdateNotifier.value;
+    print('DOWNLOAD_UPDATE_RECEIVED: $update'); // Debug log
+    
     // Check if the update is not empty (initial value) and contains necessary info
     if (update.isNotEmpty && update['id'] != null && update['status'] != null) {
       final String taskId = update['id']!;
       final int status = update['status']!; // status is an int here
 
+      print('DOWNLOAD_UPDATE_PROCESSING: TaskId: $taskId, Status: $status');
+
       // Look up the bookTitle associated with the completed taskId
       final bookTitle = _taskIdToBookTitle[taskId];
-      if (bookTitle != null) {
+      print('DOWNLOAD_UPDATE_BOOK: $bookTitle found for taskId: $taskId');
+      
+      if (bookTitle != null && mounted) {
         if (status == DownloadTaskStatus.complete.index) {
+          print('DOWNLOAD_UPDATE_COMPLETE: Setting $bookTitle to completed state');
           // If download completed, update state to 'completed'
           setState(() {
             _downloadStates[bookTitle] = DownloadState.completed;
@@ -64,6 +118,13 @@ class _BooksListPageState extends State<BooksListPage1> {
             _bookTitleToTaskId.remove(bookTitle);
             _taskIdToBookTitle.remove(taskId);
           });
+          print('DOWNLOAD_SUCCESS: $bookTitle download completed and UI updated');
+          
+          // Clear the notifier value to prevent repeated triggers
+          WidgetsBinding.instance.addPostFrameCallback((_) {
+            downloadUpdateNotifier.value = {};
+          });
+          
         } else if (status == DownloadTaskStatus.failed.index ||
             status == DownloadTaskStatus.canceled.index) {
           // If download failed or canceled, revert state to 'initial'
@@ -73,14 +134,36 @@ class _BooksListPageState extends State<BooksListPage1> {
             _bookTitleToTaskId.remove(bookTitle);
             _taskIdToBookTitle.remove(taskId);
           });
+          print('DOWNLOAD_FAILED: $bookTitle download failed or canceled');
+          
+          // Show error message to user
+          if (mounted) {
+            ScaffoldMessenger.of(context).showSnackBar(
+              SnackBar(
+                content: Text('Download failed for: $bookTitle'),
+                backgroundColor: Colors.red,
+              ),
+            );
+          }
+          
+          // Clear the notifier value
+          WidgetsBinding.instance.addPostFrameCallback((_) {
+            downloadUpdateNotifier.value = {};
+          });
         }
-        // You could also add logic here for DownloadTaskStatus.running to update progress bars
-        // if you were displaying them within the list items.
+      } else {
+        print('DOWNLOAD_UPDATE_ERROR: No bookTitle found for taskId: $taskId or widget not mounted');
+        print('DOWNLOAD_UPDATE_MAPPINGS: $_taskIdToBookTitle');
       }
     }
   }
 
   Future<void> _startDownload(String bookTitle, String fileUrl) async {
+    if (fileUrl.isEmpty) {
+      print('DOWNLOAD_ERROR: Empty file URL for $bookTitle');
+      return;
+    }
+
     // Set the state to 'downloading' immediately to show the spinner
     setState(() {
       _downloadStates[bookTitle] = DownloadState.downloading;
@@ -95,6 +178,11 @@ class _BooksListPageState extends State<BooksListPage1> {
           _downloadStates[bookTitle] = DownloadState.initial;
         });
         return;
+      }
+
+      // Ensure the directory exists
+      if (!await directory.exists()) {
+        await directory.create(recursive: true);
       }
 
       final fileName = '$bookTitle.${widget.fileType}';
@@ -125,6 +213,12 @@ class _BooksListPageState extends State<BooksListPage1> {
         // Store the taskId associated with the bookTitle for future lookups
         _bookTitleToTaskId[bookTitle] = taskId;
         _taskIdToBookTitle[taskId] = bookTitle;
+        print('DOWNLOAD_MAPPING_STORED: $bookTitle -> $taskId');
+        print('DOWNLOAD_CURRENT_MAPPINGS: $_taskIdToBookTitle');
+        
+        // Start a fallback timer to check download status periodically
+        _startDownloadCheckTimer(bookTitle, taskId);
+        
       } else {
         print('DOWNLOAD_ERROR: Failed to enqueue download for $bookTitle');
         // Revert state if enqueue failed
@@ -141,6 +235,89 @@ class _BooksListPageState extends State<BooksListPage1> {
     }
   }
 
+  // Fallback method to periodically check download status
+  void _startDownloadCheckTimer(String bookTitle, String taskId) {
+    _downloadCheckTimer?.cancel(); // Cancel any existing timer
+    
+    _downloadCheckTimer = Timer.periodic(const Duration(seconds: 2), (timer) async {
+      try {
+        final tasks = await FlutterDownloader.loadTasks();
+        final task = tasks?.firstWhere(
+          (task) => task.taskId == taskId,
+          orElse: () => throw StateError('Task not found'),
+        );
+        
+        if (task != null) {
+          print('TIMER_CHECK: Task $taskId status: ${task.status}, progress: ${task.progress}');
+          
+          if (task.status == DownloadTaskStatus.complete) {
+            // Download completed
+            timer.cancel();
+            if (mounted) {
+              setState(() {
+                _downloadStates[bookTitle] = DownloadState.completed;
+                _bookTitleToTaskId.remove(bookTitle);
+                _taskIdToBookTitle.remove(taskId);
+              });
+            }
+            print('TIMER_SUCCESS: $bookTitle download completed via timer check');
+            
+          } else if (task.status == DownloadTaskStatus.failed || 
+                     task.status == DownloadTaskStatus.canceled) {
+            // Download failed
+            timer.cancel();
+            if (mounted) {
+              setState(() {
+                _downloadStates[bookTitle] = DownloadState.initial;
+                _bookTitleToTaskId.remove(bookTitle);
+                _taskIdToBookTitle.remove(taskId);
+              });
+              
+              ScaffoldMessenger.of(context).showSnackBar(
+                SnackBar(
+                  content: Text('Download failed for: $bookTitle'),
+                  backgroundColor: Colors.red,
+                ),
+              );
+            }
+            print('TIMER_FAILED: $bookTitle download failed via timer check');
+          }
+        }
+      } catch (e) {
+        print('TIMER_ERROR: Error checking download status: $e');
+        // If we can't find the task, assume it's completed and check if file exists
+        timer.cancel();
+        _checkFileExistence(bookTitle);
+      }
+    });
+  }
+
+  // Helper method to check if file exists and update state accordingly
+  Future<void> _checkFileExistence(String bookTitle) async {
+    try {
+      final directory = await getExternalStorageDirectory();
+      if (directory == null) return;
+      
+      final fileName = '$bookTitle.${widget.fileType}';
+      final filePath = path.join(directory.path, fileName);
+      final file = File(filePath);
+      
+      if (mounted) {
+        setState(() {
+          if (file.existsSync()) {
+            _downloadStates[bookTitle] = DownloadState.completed;
+            print('FILE_CHECK: $bookTitle file exists, setting to completed');
+          } else {
+            _downloadStates[bookTitle] = DownloadState.initial;
+            print('FILE_CHECK: $bookTitle file not found, setting to initial');
+          }
+        });
+      }
+    } catch (e) {
+      print('FILE_CHECK_ERROR: Error checking file existence: $e');
+    }
+  }
+
   Future<void> _openFile(String bookTitle) async {
     try {
       final directory = await getExternalStorageDirectory();
@@ -153,17 +330,43 @@ class _BooksListPageState extends State<BooksListPage1> {
       final filePath = path.join(directory.path, fileName);
       print('OPEN_FILE_INFO: Attempting to open file: $filePath');
 
+      // Check if file exists before trying to open it
+      final file = File(filePath);
+      if (!await file.exists()) {
+        print('OPEN_FILE_ERROR: File does not exist: $filePath');
+        // Reset state to initial if file doesn't exist
+        setState(() {
+          _downloadStates[bookTitle] = DownloadState.initial;
+        });
+        return;
+      }
+
       final result = await OpenFilex.open(filePath);
       print('OPEN_FILE_RESULT: ${result.message}, Type: ${result.type}');
 
       if (result.type != ResultType.done) {
         // Handle error opening file (e.g., no app to open PDF)
         print('OPEN_FILE_ERROR: Failed to open file: ${result.message}');
-        // You might want to show a SnackBar or AlertDialog to the user here
+        // Show a snackbar to inform the user
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(
+              content: Text('Cannot open file: ${result.message}'),
+              backgroundColor: Colors.red,
+            ),
+          );
+        }
       }
     } catch (e) {
       print('OPEN_FILE_ERROR: Error opening file: $e');
-      // Handle general errors during file opening
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('Error opening file'),
+            backgroundColor: Colors.red,
+          ),
+        );
+      }
     }
   }
 
@@ -197,83 +400,6 @@ class _BooksListPageState extends State<BooksListPage1> {
           }
 
           final books = snapshot.data!;
-
-          // Use addPostFrameCallback to update download states after the widget tree is built
-          // This ensures UI state is correct upon initial load or when data changes
-          WidgetsBinding.instance.addPostFrameCallback((_) async {
-            final directory = await getExternalStorageDirectory();
-            if (directory == null) return;
-
-            final List<DownloadTask>? allTasks = await FlutterDownloader.loadTasks();
-            bool stateChanged = false; // Flag to check if setState is needed
-
-            // Create temporary maps to store potential state updates
-            final Map<String, DownloadState> newDownloadStates = {};
-            final Map<String, String> newBookTitleToTaskId = {};
-            final Map<String, String> newTaskIdToBookTitle = {};
-
-            for (var book in books) {
-              final bookTitle = (book['Title'] as String?) ?? 'Unknown Title';
-              final fileName = '$bookTitle.${widget.fileType}';
-              final savedPath = path.join(directory.path, fileName);
-              final file = File(savedPath);
-
-              // Only update state if it's not already being managed by an active download or completed status.
-              // This prioritizes the real-time updates from _onDownloadUpdate.
-              if (_downloadStates.containsKey(bookTitle) &&
-                  (_downloadStates[bookTitle] == DownloadState.downloading ||
-                   _downloadStates[bookTitle] == DownloadState.completed)) {
-                continue; // Skip if already downloading or completed, as _onDownloadUpdate handles these.
-              }
-
-              if (await file.exists()) {
-                if (_downloadStates[bookTitle] != DownloadState.completed) {
-                  newDownloadStates[bookTitle] = DownloadState.completed;
-                  stateChanged = true;
-                }
-              } else {
-                final activeTask = allTasks?.firstWhere(
-                  (task) => task.filename == fileName &&
-                              (task.status == DownloadTaskStatus.running ||
-                               task.status == DownloadTaskStatus.enqueued ||
-                               task.status == DownloadTaskStatus.paused),
-                  orElse: () => DownloadTask(
-                    taskId: '',
-                    url: '',
-                    status: DownloadTaskStatus.undefined,
-                    progress: 0,
-                    filename: '',
-                    savedDir: '',
-                    timeCreated: 0,
-                    allowCellular: true,
-                  ),
-                );
-
-                if (activeTask != null && activeTask.status != DownloadTaskStatus.undefined) {
-                  if (_downloadStates[bookTitle] != DownloadState.downloading) {
-                    newDownloadStates[bookTitle] = DownloadState.downloading;
-                    newBookTitleToTaskId[bookTitle] = activeTask.taskId;
-                    newTaskIdToBookTitle[activeTask.taskId] = bookTitle;
-                    stateChanged = true;
-                  }
-                } else {
-                  if (_downloadStates[bookTitle] != DownloadState.initial) {
-                    newDownloadStates[bookTitle] = DownloadState.initial;
-                    stateChanged = true;
-                  }
-                }
-              }
-            }
-
-            // Only call setState once if there are changes to apply
-            if (stateChanged) {
-              setState(() {
-                _downloadStates.addAll(newDownloadStates);
-                _bookTitleToTaskId.addAll(newBookTitleToTaskId);
-                _taskIdToBookTitle.addAll(newTaskIdToBookTitle);
-              });
-            }
-          });
 
           return ListView.builder(
             itemCount: books.length,

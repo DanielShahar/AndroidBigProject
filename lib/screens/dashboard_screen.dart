@@ -7,7 +7,6 @@ import 'package:path_provider/path_provider.dart'; // Import path_provider
 import 'dart:io'; // Needed for File operations
 import 'package:path/path.dart' as path; // Needed for path.join
 
-
 class DashboardScreen extends StatefulWidget {
   const DashboardScreen({super.key});
 
@@ -28,42 +27,107 @@ class _DashboardScreenState extends State<DashboardScreen> {
   /// Clears all downloaded files and cancels active tasks.
   Future<void> _clearAllDownloads() async {
     try {
+      // First, cancel all active downloads
+      await FlutterDownloader.cancelAll();
+      print('CLEAR_DOWNLOADS_INFO: All active downloads cancelled');
+
       final directory = await getExternalStorageDirectory();
       if (directory == null) {
         print('CLEAR_DOWNLOADS_ERROR: Could not get external storage directory.');
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(
+              content: Text('Cannot access storage directory'),
+              backgroundColor: Colors.red,
+            ),
+          );
+        }
         return;
       }
 
-      // Cancel all active FlutterDownloader tasks to prevent orphaned tasks
-      await FlutterDownloader.cancelAll();
+      // Check if directory exists
+      if (!await directory.exists()) {
+        print('CLEAR_DOWNLOADS_INFO: Directory does not exist, nothing to clear');
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(
+              content: Text('No downloads found to clear'),
+              backgroundColor: Colors.orange,
+            ),
+          );
+        }
+        return;
+      }
 
       // List all files in the app's external storage directory
-      final files = await directory.list().toList();
-
+      final entities = await directory.list().toList();
+      
       // Define common document file extensions to clear
-      const List<String> documentExtensions = ['.pdf', '.doc', '.docx'];
+      const List<String> documentExtensions = ['.pdf', '.doc', '.docx', '.word'];
+      
+      int deletedCount = 0;
+      int failedCount = 0;
 
-      for (var entity in files) {
+      for (var entity in entities) {
         if (entity is File) {
-          final fileName = path.basename(entity.path);
+          final fileName = path.basename(entity.path).toLowerCase();
+          
           // Only delete files that match the common document extensions
-          if (documentExtensions.any((ext) => fileName.toLowerCase().endsWith(ext))) {
+          if (documentExtensions.any((ext) => fileName.endsWith(ext))) {
             try {
               await entity.delete();
+              deletedCount++;
               print('CLEARED_DOWNLOAD: Deleted ${entity.path}');
             } catch (e) {
+              failedCount++;
               print('CLEAR_DOWNLOAD_ERROR: Failed to delete ${entity.path}: $e');
             }
           }
         }
       }
 
-      print('CLEAR_DOWNLOADS_INFO: All downloaded document files cleared.');
+      print('CLEAR_DOWNLOADS_INFO: Deleted $deletedCount files, failed to delete $failedCount files');
+
+      // Show result to user
+      if (mounted) {
+        if (deletedCount > 0) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(
+              content: Text('Successfully deleted $deletedCount downloaded files'),
+              backgroundColor: Colors.green,
+            ),
+          );
+        } else {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(
+              content: Text('No downloaded files found to delete'),
+              backgroundColor: Colors.orange,
+            ),
+          );
+        }
+        
+        if (failedCount > 0) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(
+              content: Text('Failed to delete $failedCount files'),
+              backgroundColor: Colors.red,
+            ),
+          );
+        }
+      }
+
     } catch (e) {
       print('CLEAR_DOWNLOADS_ERROR: General error during clearing downloads: $e');
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('Error clearing downloads: $e'),
+            backgroundColor: Colors.red,
+          ),
+        );
+      }
     }
   }
-
 
   @override
   Widget build(BuildContext context) {
@@ -86,7 +150,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
                 context: context,
                 builder: (context) => AlertDialog(
                   title: const Text('Clear All Downloads'),
-                  content: const Text('Are you sure you want to delete all downloaded books (PDF/Word)?'),
+                  content: const Text('Are you sure you want to delete all downloaded books (PDF/Word files)?\n\nThis action cannot be undone.'),
                   actions: [
                     TextButton(
                       onPressed: () => Navigator.of(context).pop(false),
@@ -94,13 +158,37 @@ class _DashboardScreenState extends State<DashboardScreen> {
                     ),
                     TextButton(
                       onPressed: () => Navigator.of(context).pop(true),
+                      style: TextButton.styleFrom(
+                        foregroundColor: Colors.red,
+                      ),
                       child: const Text('Delete All'),
                     ),
                   ],
                 ),
               );
+              
               if (confirm == true) {
+                // Show loading indicator while clearing
+                showDialog(
+                  context: context,
+                  barrierDismissible: false,
+                  builder: (context) => const AlertDialog(
+                    content: Row(
+                      children: [
+                        CircularProgressIndicator(),
+                        SizedBox(width: 20),
+                        Text('Clearing downloads...'),
+                      ],
+                    ),
+                  ),
+                );
+                
                 await _clearAllDownloads();
+                
+                // Close loading dialog
+                if (mounted) {
+                  Navigator.of(context).pop();
+                }
               }
             },
           ),
@@ -158,7 +246,6 @@ class _DashboardScreenState extends State<DashboardScreen> {
       bottomNavigationBar: Column(
         mainAxisSize: MainAxisSize.min,
         children: [
-
           Padding(
             padding: const EdgeInsets.only(bottom: 8.0, top: 4.0),
             child: ElevatedButton(
