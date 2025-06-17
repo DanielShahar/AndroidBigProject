@@ -42,28 +42,28 @@ class _DashboardScreenState extends State<DashboardScreen> {
       'icon': Icons.emoji_nature,
       'age': '4-8',
       'type': 'word',
-      'color': Color(0xFFB8E6B8), // Light green for middle age group
+      'color': Color.fromARGB(255, 226, 80, 109), // Light green for middle age group
     },
     {
       'label': 'Ages 4-8: PDF',
       'icon': Icons.emoji_nature,
       'age': '4-8',
       'type': 'pdf',
-      'color': Color(0xFFB8E6B8),
+      'color': Color.fromARGB(255, 226, 80, 109),
     },
     {
       'label': 'Ages 8-12: Word',
       'icon': Icons.auto_stories,
       'age': '8-12',
       'type': 'word',
-      'color': Color(0xFF9ECBF0), // Light blue for oldest age group
+      'color': Color.fromARGB(255, 230, 35, 74), // Light blue for oldest age group
     },
     {
       'label': 'Ages 8-12: PDF',
       'icon': Icons.auto_stories,
       'age': '8-12',
       'type': 'pdf',
-      'color': Color(0xFF9ECBF0),
+      'color': Color.fromARGB(255, 230, 35, 74),
     },
   ];
 
